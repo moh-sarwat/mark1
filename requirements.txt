@@ -1,0 +1,6 @@
+flask
+flask-bootstrap
+pandas
+openpyxl
+weasyprint
+gunicorn
