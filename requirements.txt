@@ -5,3 +5,4 @@ openpyxl
 weasyprint
 gunicorn
 requests
+bs4
