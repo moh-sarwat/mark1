@@ -7,9 +7,9 @@ TRACKING_PATTERNS = {
     "Meta Pixel": {
         "identifier": "connect.facebook.net",
         "id_patterns": [
-            r"fbq\(\s*['\"]init['\"]\s*,\s*['\"]?([\d]+)['\"]?\)",  # ✅ Matches fbq("init", "1234567890")
-            r"facebook\.com/tr/\?id=([\d]+)",  # ✅ Matches network requests
-            r"data-fbp=['\"]?([\d]+)['\"]?",  # ✅ Matches hidden Meta Pixel data attributes
+            r"fbq\(\s*['\"]init['\"]\s*,\s*['\"]?([\d]+)['\"]?\)",  # ✅ Standard fbq("init", "1234567890")
+            r"facebook\.com/tr/\?id=([\d]+)",  # ✅ Matches network request pattern
+            r"data-fbp=['\"]?([\d]+)['\"]?",  # ✅ Matches hidden Meta Pixel in data attributes
         ],
     },
     "Google Analytics (GA4)": {
@@ -32,36 +32,22 @@ TRACKING_PATTERNS = {
         "identifier": "linkedin.com/insightTag",
         "id_patterns": [r"linkedin.com/insightTag/([\d]+)"],
     },
-    "Microsoft Clarity": {
-        "identifier": "clarity.ms",
-        "id_patterns": [],
-    },
-    "Pinterest Tag": {
-        "identifier": "ct.pinterest.com",
-        "id_patterns": [],
-    },
-    "Twitter (X) Pixel": {
-        "identifier": "ads.twitter.com",
-        "id_patterns": [],
-    },
 }
 
-import re
-
 def extract_pixel_id(script_text, id_patterns):
-    """ Extracts pixel/tracking ID from script text using regex patterns."""
+    """Extracts pixel/tracking ID from script text using regex patterns."""
     if not script_text:
         return None
 
     for pattern in id_patterns:
         match = re.search(pattern, script_text)
-        if match and match.groups():  # ✅ SAFE CHECK: Ensure there's at least one group
+        if match and match.groups():
             return match.group(1)  # ✅ Extract the first found ID
 
     return None
 
 def check_tracking_pixels(url):
-    """ Scans a website for tracking pixels and extracts IDs if found """
+    """Scans a website for tracking pixels and extracts IDs if found"""
     try:
         response = requests.get(url, timeout=10)
         response.raise_for_status()
@@ -73,11 +59,13 @@ def check_tracking_pixels(url):
             id_patterns = data["id_patterns"]
             pixel_id = None
 
+            # ✅ Check <script> tags for Pixel ID
             for script in soup.find_all("script"):
                 if script.string and identifier in script.string:
                     pixel_id = extract_pixel_id(script.string, id_patterns)
                     break  # Stop once we find the first valid match
 
+            # ✅ Check <meta> and <link> tags for hidden pixel IDs
             for meta in soup.find_all("meta"):
                 meta_content = str(meta)
                 if identifier in meta_content:
@@ -88,6 +76,14 @@ def check_tracking_pixels(url):
                 link_content = str(link)
                 if identifier in link_content:
                     pixel_id = extract_pixel_id(link_content, id_patterns)
+                    break
+
+            # ✅ NEW: Check <img> tags for tracking pixel
+            for img in soup.find_all("img"):
+                img_src = img.get("src", "")
+                match = re.search(r"facebook\.com/tr\?id=([\d]+)", img_src)
+                if match:
+                    pixel_id = match.group(1)
                     break
 
             found_pixels[name] = {
