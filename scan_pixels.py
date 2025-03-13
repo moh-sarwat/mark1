@@ -2,11 +2,6 @@ import requests
 from bs4 import BeautifulSoup
 import re
 import json
-import time
-from selenium import webdriver
-from selenium.webdriver.chrome.service import Service
-from webdriver_manager.chrome import ChromeDriverManager
-from selenium.webdriver.chrome.options import Options
 
 # Define tracking pixel identifiers & ID extraction patterns
 TRACKING_PATTERNS = {
@@ -15,6 +10,7 @@ TRACKING_PATTERNS = {
         "id_patterns": [
             r"fbq\(\s*['\"]init['\"]\s*,\s*['\"]?([\d]+)['\"]?\)",  # ✅ Standard fbq("init", "1234567890")
             r"facebook\.com/tr/\?id=([\d]+)",  # ✅ Matches tracking request
+            r"data-fbp=['\"]?([\d]+)['\"]?",  # ✅ Matches hidden Meta Pixel in attributes
         ],
     },
     "Google Analytics (GA4)": {
@@ -25,25 +21,26 @@ TRACKING_PATTERNS = {
         "identifier": "googletagmanager.com",
         "id_patterns": [r"GTM-[A-Z0-9]+"],
     },
-    "Shopify Web Pixels Manager": {
-        "identifier": "webPixelsConfigList",
+    "TikTok Pixel": {
+        "identifier": "analytics.tiktok.com",
+        "id_patterns": [r"ttq.identify\(\"([\d]+)\"\)"],
+    },
+    "Snapchat Pixel": {
+        "identifier": "sc-static.net/s",
+        "id_patterns": [r"snaptr\('init',\s*['\"]?([A-Z0-9\-]+)['\"]?\)"],
+    },
+    "LinkedIn Insight": {
+        "identifier": "linkedin.com/insightTag",
+        "id_patterns": [r"linkedin.com/insightTag/([\d]+)"],
+    },
+    "Shopify Web Pixels Manager": {  # ✅ NEW: Shopify tracking detection
+        "identifier": "web-pixels-manager-setup",
         "id_patterns": [],
     },
 }
 
-def setup_selenium():
-    """Sets up a headless Chrome Selenium driver."""
-    options = Options()
-    options.add_argument("--headless")  # ✅ Run without UI
-    options.add_argument("--no-sandbox")  
-    options.add_argument("--disable-dev-shm-usage")  
-
-    service = Service(ChromeDriverManager().install())
-    driver = webdriver.Chrome(service=service, options=options)
-    return driver
-
 def extract_pixel_id(script_text, id_patterns):
-    """ Extracts pixel/tracking ID from script text using regex patterns."""
+    """Extracts pixel/tracking ID from script text using regex patterns."""
     if not script_text:
         return None
 
@@ -54,39 +51,41 @@ def extract_pixel_id(script_text, id_patterns):
 
     return None
 
-def extract_shopify_pixels(html_source):
-    """Extracts Shopify tracking pixels from Web Pixels Manager JSON."""
-    shopify_pixels = {}
+def extract_shopify_pixels(soup):
+    """Extracts tracking pixels from Shopify's Web Pixels Manager JSON."""
+    for script in soup.find_all("script"):
+        script_content = script.string
+        if script_content and "webPixelsConfigList" in script_content:
+            try:
+                # ✅ Extract JSON-like structure from the script content
+                json_match = re.search(r"webPixelsConfigList\":(\[.*?\])", script_content)
+                if json_match:
+                    json_data = json.loads(json_match.group(1))  # ✅ Convert to Python dict
+                    
+                    # ✅ Extract tracking pixels from JSON
+                    extracted_pixels = {}
+                    for entry in json_data:
+                        if "configuration" in entry:
+                            config = json.loads(entry["configuration"])
+                            if "pixel_id" in config:
+                                extracted_pixels[entry["id"]] = {
+                                    "found": True,
+                                    "pixel_id": config["pixel_id"]
+                                }
 
-    try:
-        json_match = re.search(r"webPixelsConfigList\":(\[.*?\])", html_source)
-        if json_match:
-            json_data = json.loads(json_match.group(1))  # ✅ Convert JSON to Python dict
-            
-            for entry in json_data:
-                if "configuration" in entry:
-                    config = json.loads(entry["configuration"])
-                    if "pixel_id" in config:
-                        shopify_pixels[entry["id"]] = {
-                            "found": True,
-                            "pixel_id": config["pixel_id"]
-                        }
-    except json.JSONDecodeError:
-        pass  # ✅ Continue if JSON parsing fails
+                    return extracted_pixels  # ✅ Return extracted tracking pixels
 
-    return shopify_pixels  # ✅ Returns Shopify pixels if found
+            except json.JSONDecodeError:
+                pass  # ✅ Continue if JSON parsing fails
+
+    return {}  # ✅ Return empty dictionary if no pixels found
 
 def check_tracking_pixels(url):
-    """Scans a website for tracking pixels and extracts IDs using Selenium."""
+    """Scans a website for tracking pixels and extracts IDs if found"""
     try:
-        driver = setup_selenium()
-        driver.get(url)
-        time.sleep(5)  # ✅ Allow time for JavaScript to execute
-
-        html_source = driver.page_source  # ✅ Get fully rendered HTML
-        driver.quit()
-
-        soup = BeautifulSoup(html_source, 'html.parser')
+        response = requests.get(url, timeout=10)
+        response.raise_for_status()
+        soup = BeautifulSoup(response.text, 'html.parser')
 
         found_pixels = {}
 
@@ -96,11 +95,12 @@ def check_tracking_pixels(url):
             id_patterns = data["id_patterns"]
             pixel_id = None
 
+            # ✅ Check <script> tags for tracking pixels
             for script in soup.find_all("script"):
                 script_content = script.string
                 if script_content and identifier in script_content:
                     pixel_id = extract_pixel_id(script_content, id_patterns)
-                    break  # ✅ Stop once found
+                    break  # Stop after finding the first valid match
 
             found_pixels[name] = {
                 "found": bool(pixel_id),
@@ -108,13 +108,13 @@ def check_tracking_pixels(url):
             }
 
         # ✅ Extract Shopify-specific tracking pixels
-        shopify_pixels = extract_shopify_pixels(html_source)
-        found_pixels.update(shopify_pixels)
+        shopify_pixels = extract_shopify_pixels(soup)
+        found_pixels.update(shopify_pixels)  # ✅ Merge results with standard tracking pixels
 
         return {"url": url, "tracking_pixels": found_pixels}
 
-    except Exception as e:
-        return {"error": f"Failed to scan {url}: {e}"}
+    except requests.exceptions.RequestException as e:
+        return {"error": f"Failed to fetch {url}: {e}"}
 
 # Example usage
 if __name__ == "__main__":

@@ -6,6 +6,3 @@ weasyprint
 gunicorn
 requests
 bs4
-selenium
-flask-cors
-webdriver-manager
