@@ -35,16 +35,12 @@ TRACKING_PATTERNS = {
     },
     "Shopify Web Pixels Manager": {  # ✅ NEW: Shopify tracking detection
         "identifier": "web-pixels-manager-setup",
-        "id_patterns": [
-            r'\"pixel_id\":\"([\d]+)\"',  # ✅ Extracts Pixel IDs from JSON inside scripts
-            r'\"pixelId\":\"([\w-]+)\"',  # ✅ Matches Shopify's alternative pixel ID format
-            r'\"config\":\"{\\\"pixel_id\\\":\\\"([\w-]+)\\\"',  # ✅ Extracts from Shopify GA4 setup
-        ],
+        "id_patterns": [],
     },
 }
 
 def extract_pixel_id(script_text, id_patterns):
-    """ Extracts pixel/tracking ID from script text using regex patterns."""
+    """Extracts pixel/tracking ID from script text using regex patterns."""
     if not script_text:
         return None
 
@@ -55,6 +51,35 @@ def extract_pixel_id(script_text, id_patterns):
 
     return None
 
+def extract_shopify_pixels(soup):
+    """Extracts tracking pixels from Shopify's Web Pixels Manager JSON."""
+    for script in soup.find_all("script"):
+        script_content = script.string
+        if script_content and "webPixelsConfigList" in script_content:
+            try:
+                # ✅ Extract JSON-like structure from the script content
+                json_match = re.search(r"webPixelsConfigList\":(\[.*?\])", script_content)
+                if json_match:
+                    json_data = json.loads(json_match.group(1))  # ✅ Convert to Python dict
+                    
+                    # ✅ Extract tracking pixels from JSON
+                    extracted_pixels = {}
+                    for entry in json_data:
+                        if "configuration" in entry:
+                            config = json.loads(entry["configuration"])
+                            if "pixel_id" in config:
+                                extracted_pixels[entry["id"]] = {
+                                    "found": True,
+                                    "pixel_id": config["pixel_id"]
+                                }
+
+                    return extracted_pixels  # ✅ Return extracted tracking pixels
+
+            except json.JSONDecodeError:
+                pass  # ✅ Continue if JSON parsing fails
+
+    return {}  # ✅ Return empty dictionary if no pixels found
+
 def check_tracking_pixels(url):
     """Scans a website for tracking pixels and extracts IDs if found"""
     try:
@@ -64,6 +89,7 @@ def check_tracking_pixels(url):
 
         found_pixels = {}
 
+        # ✅ Extract standard tracking pixels
         for name, data in TRACKING_PATTERNS.items():
             identifier = data["identifier"]
             id_patterns = data["id_patterns"]
@@ -72,18 +98,6 @@ def check_tracking_pixels(url):
             # ✅ Check <script> tags for tracking pixels
             for script in soup.find_all("script"):
                 script_content = script.string
-
-                # ✅ Handle JSON-encoded tracking scripts (Shopify Web Pixels Manager)
-                if script_content and "pixel_id" in script_content:
-                    try:
-                        json_data = json.loads(script_content)
-                        if isinstance(json_data, dict) and "pixel_id" in json_data:
-                            pixel_id = json_data["pixel_id"]
-                            break  # ✅ Found Shopify tracking ID
-                    except json.JSONDecodeError:
-                        pass  # Continue scanning if JSON parsing fails
-
-                # ✅ Check regular tracking scripts
                 if script_content and identifier in script_content:
                     pixel_id = extract_pixel_id(script_content, id_patterns)
                     break  # Stop after finding the first valid match
@@ -92,6 +106,10 @@ def check_tracking_pixels(url):
                 "found": bool(pixel_id),
                 "pixel_id": pixel_id
             }
+
+        # ✅ Extract Shopify-specific tracking pixels
+        shopify_pixels = extract_shopify_pixels(soup)
+        found_pixels.update(shopify_pixels)  # ✅ Merge results with standard tracking pixels
 
         return {"url": url, "tracking_pixels": found_pixels}
 
