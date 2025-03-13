@@ -1,66 +1,61 @@
 import requests
 from bs4 import BeautifulSoup
-from urllib.parse import urljoin, urlparse
+import time
+
 from scan_pixels import check_tracking_pixels
 
-def extract_internal_links(base_url):
-    """Extracts all internal links from the homepage"""
+def get_site_links(url):
+    """Extracts all internal links from the given URL"""
     try:
-        response = requests.get(base_url, timeout=10)
+        response = requests.get(url, timeout=10)
         response.raise_for_status()
         soup = BeautifulSoup(response.text, "html.parser")
 
         links = set()
         for link in soup.find_all("a", href=True):
-            href = link["href"]
-            full_url = urljoin(base_url, href)
+            full_link = requests.compat.urljoin(url, link["href"])
+            if url in full_link:  # Ensure it's an internal link
+                links.add(full_link)
 
-            # Ensure it's an internal link
-            if urlparse(full_url).netloc == urlparse(base_url).netloc:
-                links.add(full_url)
+        return list(links)[:10]  # ✅ LIMIT TO 10 PAGES TO AVOID CRASHES
 
-        return list(links)
-    except Exception as e:
-        print(f"Error extracting links: {e}")
+    except requests.exceptions.RequestException as e:
         return []
 
 def scan_full_site(url):
-    """Scans all internal pages of a website and aggregates tracking pixel results."""
-    crawled_pages = extract_internal_links(url)
-    crawled_pages.insert(0, url)  # Ensure homepage is included
+    """Scans the homepage and up to 10 internal pages for tracking pixels"""
+    all_results = {}
 
-    print(f"Scanning {len(crawled_pages)} pages...")
+    pages_to_scan = get_site_links(url)
+    pages_to_scan.insert(0, url)  # ✅ Ensure the main page is scanned first
 
-    pages_results = {}
+    print(f"Scanning {len(pages_to_scan)} pages...")
 
-    for page in crawled_pages:
+    for page in pages_to_scan:
         try:
+            # ✅ ADD DELAY TO REDUCE MEMORY USAGE
+            time.sleep(1)
+
             scan_result = check_tracking_pixels(page)
-            pages_results[page] = scan_result["tracking_pixels"]
+            all_results[page] = scan_result["tracking_pixels"]
+
         except Exception as e:
-            pages_results[page] = {"error": str(e)}
+            all_results[page] = {"error": str(e)}
 
-    # ✅ Debugging: Print pages_results to see what's wrong
-    print("DEBUG: Full Scan Output:")
-    print(pages_results)
+    return {"tracking_pixels": merge_results(all_results)}
 
-    # ✅ Aggregate results properly
-    summary = {}
+def merge_results(all_results):
+    """Merges results from all pages to avoid duplicate pixel detection"""
+    merged = {}
 
-    for page, pixels in pages_results.items():
-        if isinstance(pixels, str):  # ✅ Fix potential error
-            print(f"Skipping {page} due to error: {pixels}")
-            continue  # Skip if response is not valid
+    for page, scan in all_results.items():
+        for pixel, details in scan.items():
+            if pixel not in merged:
+                merged[pixel] = {"found": False, "pixel_id": None, "pages_found": []}
 
-        for pixel, data in pixels.items():
-            if pixel not in summary:
-                summary[pixel] = {"found": False, "pixel_id": None, "pages_found": []}
+            if details["found"]:
+                merged[pixel]["found"] = True
+                merged[pixel]["pixel_id"] = details["pixel_id"]
+                merged[pixel]["pages_found"].append(page)
 
-            if isinstance(data, dict) and "found" in data:  # ✅ Ensure data is valid
-                if data["found"]:
-                    summary[pixel]["found"] = True
-                    summary[pixel]["pages_found"].append(page)
-                    if data["pixel_id"] and summary[pixel]["pixel_id"] is None:
-                        summary[pixel]["pixel_id"] = data["pixel_id"]
-
-    return {"tracking_pixels": summary}
+    return merged
