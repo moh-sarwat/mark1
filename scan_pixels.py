@@ -20,14 +20,14 @@ TRACKING_PATTERNS = {
 }
 
 def extract_pixel_id(script_text, id_patterns):
-    """ Extracts pixel/tracking ID from script text using regex patterns """
+    """Extracts pixel/tracking ID from script text using regex patterns."""
     if not script_text:
         return None
 
     for pattern in id_patterns:
         match = re.search(pattern, script_text)
         if match:
-            return match.group(1)  # Extract the first capture group as the ID
+            return match.group(1) if match.groups() else None  # ✅ SAFE FIX: Check if group exists
 
     return None
 
