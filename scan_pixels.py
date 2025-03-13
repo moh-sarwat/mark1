@@ -1,6 +1,7 @@
 import requests
 from bs4 import BeautifulSoup
 import re
+import json
 
 # Define tracking pixel identifiers & ID extraction patterns
 TRACKING_PATTERNS = {
@@ -8,8 +9,8 @@ TRACKING_PATTERNS = {
         "identifier": "connect.facebook.net",
         "id_patterns": [
             r"fbq\(\s*['\"]init['\"]\s*,\s*['\"]?([\d]+)['\"]?\)",  # ✅ Standard fbq("init", "1234567890")
-            r"facebook\.com/tr/\?id=([\d]+)",  # ✅ Matches network request pattern
-            r"data-fbp=['\"]?([\d]+)['\"]?",  # ✅ Matches hidden Meta Pixel in data attributes
+            r"facebook\.com/tr/\?id=([\d]+)",  # ✅ Matches tracking request
+            r"data-fbp=['\"]?([\d]+)['\"]?",  # ✅ Matches hidden Meta Pixel in attributes
         ],
     },
     "Google Analytics (GA4)": {
@@ -32,10 +33,18 @@ TRACKING_PATTERNS = {
         "identifier": "linkedin.com/insightTag",
         "id_patterns": [r"linkedin.com/insightTag/([\d]+)"],
     },
+    "Shopify Web Pixels Manager": {  # ✅ NEW: Shopify tracking detection
+        "identifier": "web-pixels-manager-setup",
+        "id_patterns": [
+            r'\"pixel_id\":\"([\d]+)\"',  # ✅ Extracts Pixel IDs from JSON inside scripts
+            r'\"pixelId\":\"([\w-]+)\"',  # ✅ Matches Shopify's alternative pixel ID format
+            r'\"config\":\"{\\\"pixel_id\\\":\\\"([\w-]+)\\\"',  # ✅ Extracts from Shopify GA4 setup
+        ],
+    },
 }
 
 def extract_pixel_id(script_text, id_patterns):
-    """Extracts pixel/tracking ID from script text using regex patterns."""
+    """ Extracts pixel/tracking ID from script text using regex patterns."""
     if not script_text:
         return None
 
@@ -55,7 +64,6 @@ def check_tracking_pixels(url):
 
         found_pixels = {}
 
-        # ✅ Loop through each pixel type separately
         for name, data in TRACKING_PATTERNS.items():
             identifier = data["identifier"]
             id_patterns = data["id_patterns"]
@@ -63,31 +71,22 @@ def check_tracking_pixels(url):
 
             # ✅ Check <script> tags for tracking pixels
             for script in soup.find_all("script"):
-                if script.string and identifier in script.string:
-                    pixel_id = extract_pixel_id(script.string, id_patterns)
+                script_content = script.string
+
+                # ✅ Handle JSON-encoded tracking scripts (Shopify Web Pixels Manager)
+                if script_content and "pixel_id" in script_content:
+                    try:
+                        json_data = json.loads(script_content)
+                        if isinstance(json_data, dict) and "pixel_id" in json_data:
+                            pixel_id = json_data["pixel_id"]
+                            break  # ✅ Found Shopify tracking ID
+                    except json.JSONDecodeError:
+                        pass  # Continue scanning if JSON parsing fails
+
+                # ✅ Check regular tracking scripts
+                if script_content and identifier in script_content:
+                    pixel_id = extract_pixel_id(script_content, id_patterns)
                     break  # Stop after finding the first valid match
-
-            # ✅ Check <meta> and <link> tags for hidden tracking pixels
-            for meta in soup.find_all("meta"):
-                meta_content = str(meta)
-                if identifier in meta_content:
-                    pixel_id = extract_pixel_id(meta_content, id_patterns)
-                    break
-
-            for link in soup.find_all("link"):
-                link_content = str(link)
-                if identifier in link_content:
-                    pixel_id = extract_pixel_id(link_content, id_patterns)
-                    break
-
-            # ✅ NEW: Check <img> tracking pixels, BUT ONLY FOR META PIXEL
-            if name == "Meta Pixel":
-                for img in soup.find_all("img"):
-                    img_src = img.get("src", "")
-                    match = re.search(r"facebook\.com/tr\?id=([\d]+)", img_src)
-                    if match:
-                        pixel_id = match.group(1)
-                        break  # Stop after finding the first valid match
 
             found_pixels[name] = {
                 "found": bool(pixel_id),
