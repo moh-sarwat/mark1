@@ -4,30 +4,59 @@ import re
 
 # Define tracking pixel identifiers & ID extraction patterns
 TRACKING_PATTERNS = {
-    "Meta Pixel": {"identifier": "connect.facebook.net", "id_patterns": [
-        r"fbq\(\s*'init'\s*,\s*['\"]?([\d]+)['\"]?\)",  # ✅ Standard fbq('init', '1234567890')
-        r"facebook\.com/tr/\?id=([\d]+)",  # ✅ Network request pattern
-        r"data-fbp=['\"]?([\d]+)['\"]?"  # ✅ Meta Pixel inside data attribute
-    ]},
-    "Google Analytics (GA4)": {"identifier": "gtag('config'", "id_patterns": [r"gtag\('config',\s*['\"]?([A-Z0-9\-]+)['\"]?\)"]},
-    "Google Tag Manager": {"identifier": "googletagmanager.com", "id_patterns": [r"GTM-[A-Z0-9]+"]},
-    "TikTok Pixel": {"identifier": "analytics.tiktok.com", "id_patterns": [r"ttq.identify\(\"([\d]+)\"\)"]},
-    "Snapchat Pixel": {"identifier": "sc-static.net/s", "id_patterns": [r"snaptr\('init',\s*['\"]?([A-Z0-9\-]+)['\"]?\)"]},
-    "LinkedIn Insight": {"identifier": "linkedin.com/insightTag", "id_patterns": [r"linkedin.com/insightTag/([\d]+)"]},
-    "Microsoft Clarity": {"identifier": "clarity.ms", "id_patterns": []},
-    "Pinterest Tag": {"identifier": "ct.pinterest.com", "id_patterns": []},
-    "Twitter (X) Pixel": {"identifier": "ads.twitter.com", "id_patterns": []}
+    "Meta Pixel": {
+        "identifier": "connect.facebook.net",
+        "id_patterns": [
+            r"fbq\(\s*['\"]init['\"]\s*,\s*['\"]?([\d]+)['\"]?\)",  # ✅ Matches fbq("init", "1234567890")
+            r"facebook\.com/tr/\?id=([\d]+)",  # ✅ Matches network requests
+            r"data-fbp=['\"]?([\d]+)['\"]?",  # ✅ Matches hidden Meta Pixel data attributes
+        ],
+    },
+    "Google Analytics (GA4)": {
+        "identifier": "gtag('config'",
+        "id_patterns": [r"gtag\('config',\s*['\"]?([A-Z0-9\-]+)['\"]?\)"],
+    },
+    "Google Tag Manager": {
+        "identifier": "googletagmanager.com",
+        "id_patterns": [r"GTM-[A-Z0-9]+"],
+    },
+    "TikTok Pixel": {
+        "identifier": "analytics.tiktok.com",
+        "id_patterns": [r"ttq.identify\(\"([\d]+)\"\)"],
+    },
+    "Snapchat Pixel": {
+        "identifier": "sc-static.net/s",
+        "id_patterns": [r"snaptr\('init',\s*['\"]?([A-Z0-9\-]+)['\"]?\)"],
+    },
+    "LinkedIn Insight": {
+        "identifier": "linkedin.com/insightTag",
+        "id_patterns": [r"linkedin.com/insightTag/([\d]+)"],
+    },
+    "Microsoft Clarity": {
+        "identifier": "clarity.ms",
+        "id_patterns": [],
+    },
+    "Pinterest Tag": {
+        "identifier": "ct.pinterest.com",
+        "id_patterns": [],
+    },
+    "Twitter (X) Pixel": {
+        "identifier": "ads.twitter.com",
+        "id_patterns": [],
+    },
 }
 
+import re
+
 def extract_pixel_id(script_text, id_patterns):
-    """Extracts pixel/tracking ID from script text using regex patterns."""
+    """ Extracts pixel/tracking ID from script text using regex patterns."""
     if not script_text:
         return None
 
     for pattern in id_patterns:
         match = re.search(pattern, script_text)
-        if match:
-            return match.group(1) if match.groups() else None  # ✅ SAFE FIX: Check if group exists
+        if match and match.groups():  # ✅ SAFE CHECK: Ensure there's at least one group
+            return match.group(1)  # ✅ Extract the first found ID
 
     return None
 
