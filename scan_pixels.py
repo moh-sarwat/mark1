@@ -54,18 +54,20 @@ def check_tracking_pixels(url):
         soup = BeautifulSoup(response.text, 'html.parser')
 
         found_pixels = {}
+
+        # ✅ Loop through each pixel type separately
         for name, data in TRACKING_PATTERNS.items():
             identifier = data["identifier"]
             id_patterns = data["id_patterns"]
             pixel_id = None
 
-            # ✅ Check <script> tags for Pixel ID
+            # ✅ Check <script> tags for tracking pixels
             for script in soup.find_all("script"):
                 if script.string and identifier in script.string:
                     pixel_id = extract_pixel_id(script.string, id_patterns)
-                    break  # Stop once we find the first valid match
+                    break  # Stop after finding the first valid match
 
-            # ✅ Check <meta> and <link> tags for hidden pixel IDs
+            # ✅ Check <meta> and <link> tags for hidden tracking pixels
             for meta in soup.find_all("meta"):
                 meta_content = str(meta)
                 if identifier in meta_content:
@@ -78,16 +80,17 @@ def check_tracking_pixels(url):
                     pixel_id = extract_pixel_id(link_content, id_patterns)
                     break
 
-            # ✅ NEW: Check <img> tags for tracking pixel
-            for img in soup.find_all("img"):
-                img_src = img.get("src", "")
-                match = re.search(r"facebook\.com/tr\?id=([\d]+)", img_src)
-                if match:
-                    pixel_id = match.group(1)
-                    break
+            # ✅ NEW: Check <img> tracking pixels, BUT ONLY FOR META PIXEL
+            if name == "Meta Pixel":
+                for img in soup.find_all("img"):
+                    img_src = img.get("src", "")
+                    match = re.search(r"facebook\.com/tr\?id=([\d]+)", img_src)
+                    if match:
+                        pixel_id = match.group(1)
+                        break  # Stop after finding the first valid match
 
             found_pixels[name] = {
-                "found": bool(pixel_id or identifier in str(soup)),
+                "found": bool(pixel_id),
                 "pixel_id": pixel_id
             }
 
